@@ -45,6 +45,7 @@ from vllm.v1.core.sched.output import (
     NewRequestData,
     SchedulerOutput,
 )
+from vllm.v1.profiling.case01_trace import case01_classify_scheduler_step, case01_log
 from vllm.v1.core.sched.request_queue import (
     RequestQueue,
     SchedulingPolicy,
@@ -924,6 +925,22 @@ class Scheduler(SchedulerInterface):
 
         with record_function_or_nullcontext("schedule: update_after_schedule"):
             self._update_after_schedule(scheduler_output)
+
+        per_req_tokens = list(num_scheduled_tokens.values())
+        case01_log(
+            "scheduler",
+            num_running=len(self.running),
+            num_waiting=len(self.waiting) + len(self.skipped_waiting),
+            max_num_seqs=self.max_num_running_reqs,
+            num_scheduled_reqs=len(per_req_tokens),
+            total_tokens=total_num_scheduled_tokens,
+            per_req_tokens=per_req_tokens,
+            max_per_req=max(per_req_tokens) if per_req_tokens else 0,
+            min_per_req=min(per_req_tokens) if per_req_tokens else 0,
+            step_kind=case01_classify_scheduler_step(per_req_tokens),
+            num_new_reqs=len(scheduled_new_reqs),
+            num_preempted=len(preempted_reqs),
+        )
         return scheduler_output
 
     def _preempt_request(self, request: Request, timestamp: float) -> None:

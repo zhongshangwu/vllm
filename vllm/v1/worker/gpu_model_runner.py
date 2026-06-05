@@ -3415,6 +3415,24 @@ class GPUModelRunner(
                 runtime_mode=str(cudagraph_mode),
             )
 
+        from vllm.v1.profiling.case01_trace import case01_log
+
+        case01_log(
+            "runner_batch",
+            num_reqs=num_reqs,
+            num_tokens_unpadded=num_tokens,
+            max_num_scheduled_tokens=max_num_scheduled_tokens,
+            per_req_tokens=num_scheduled_tokens_np.tolist(),
+            uniform_decode=uniform_decode,
+            cudagraph_mode=cudagraph_mode.name,
+            batch_desc=str(batch_descriptor),
+            num_tokens_padded=batch_descriptor.num_tokens,
+            padding_waste=batch_descriptor.num_tokens - num_tokens,
+            has_lora=has_lora,
+            use_cascade_attn=use_cascade_attn,
+            has_encoder_output=has_encoder_output,
+        )
+
         return (
             cudagraph_mode,
             batch_descriptor,
