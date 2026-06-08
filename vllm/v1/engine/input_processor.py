@@ -310,6 +310,15 @@ class InputProcessor:
                     )
                 )
 
+        self._log_tokenize_trace(
+            request_id,
+            decoder_inputs,
+            prompt_token_ids,
+            prompt_embeds,
+            mm_features,
+            sampling_params,
+        )
+
         return EngineCoreRequest(
             request_id=request_id,
             prompt_token_ids=prompt_token_ids,
@@ -325,6 +334,43 @@ class InputProcessor:
             trace_headers=trace_headers,
             resumable=resumable,
         )
+
+    def _log_tokenize_trace(
+        self,
+        request_id: str,
+        decoder_inputs: dict,
+        prompt_token_ids: list[int] | None,
+        prompt_embeds: Any,
+        mm_features: list | None,
+        sampling_params: SamplingParams | None,
+    ) -> None:
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        prompt_len = length_from_prompt_token_ids_or_embeds(
+            prompt_token_ids, prompt_embeds
+        )
+        mm_info = "none"
+        if mm_features:
+            mm_info = ",".join(
+                f"{f.modality}@{f.mm_position.offset}:{f.mm_position.length}"
+                for f in mm_features
+            )
+        inference_trace(
+            "tokenize",
+            request_id=request_id,
+            input_type=decoder_inputs.get("type", "unknown"),
+            prompt_len=prompt_len,
+            prompt_token_ids=prompt_token_ids,
+            has_prompt_embeds=prompt_embeds is not None,
+            mm_features=mm_info,
+            max_tokens=(
+                sampling_params.max_tokens if sampling_params is not None else None
+            ),
+            temperature=(
+                sampling_params.temperature if sampling_params is not None else None
+            ),
+        )
+
 
     def _validate_prompt_len(
         self,

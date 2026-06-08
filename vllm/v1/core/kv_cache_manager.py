@@ -372,7 +372,16 @@ class KVCacheManager:
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
         if not self.enable_caching or delay_cache_blocks:
-            return self.create_kv_cache_blocks(new_blocks)
+            result = self.create_kv_cache_blocks(new_blocks)
+            self._log_kv_alloc_trace(
+                request,
+                num_new_tokens,
+                num_new_computed_tokens,
+                num_external_computed_tokens,
+                num_lookahead_tokens,
+                result,
+            )
+            return result
 
         # NOTE(woosuk): We want to commit (cache) up to num_local_computed_tokens
         # + num_external_computed_tokens + num_new_tokens, but must exclude
@@ -385,7 +394,41 @@ class KVCacheManager:
         )
         self.coordinator.cache_blocks(request, num_tokens_to_cache)
 
-        return self.create_kv_cache_blocks(new_blocks)
+        result = self.create_kv_cache_blocks(new_blocks)
+        self._log_kv_alloc_trace(
+            request,
+            num_new_tokens,
+            num_new_computed_tokens,
+            num_external_computed_tokens,
+            num_lookahead_tokens,
+            result,
+        )
+        return result
+
+    @staticmethod
+    def _log_kv_alloc_trace(
+        request: Request,
+        num_new_tokens: int,
+        num_new_computed_tokens: int,
+        num_external_computed_tokens: int,
+        num_lookahead_tokens: int,
+        result: KVCacheBlocks,
+    ) -> None:
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        block_ids = result.get_block_ids(allow_none=True)
+        inference_trace(
+            "kv_alloc",
+            request_id=request.request_id,
+            num_new_tokens=num_new_tokens,
+            num_computed_before=request.num_computed_tokens,
+            num_tokens_total=request.num_tokens,
+            num_new_computed_tokens=num_new_computed_tokens,
+            num_external_computed_tokens=num_external_computed_tokens,
+            num_lookahead_tokens=num_lookahead_tokens,
+            new_block_ids=block_ids[0] if block_ids else [],
+            prefix_cache_hit=num_new_computed_tokens > 0,
+        )
 
     def free(self, request: Request) -> None:
         """Free the blocks allocated for the request.
@@ -395,6 +438,14 @@ class KVCacheManager:
         Args:
             request: The request to free the blocks.
         """
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        inference_trace(
+            "kv_free",
+            request_id=request.request_id,
+            num_computed_tokens=request.num_computed_tokens,
+            num_tokens=request.num_tokens,
+        )
         self.coordinator.free(request.request_id)
 
     def remove_skipped_blocks(

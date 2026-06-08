@@ -627,6 +627,16 @@ class OutputProcessor:
                 stop_string = req_state.detokenizer.update(
                     new_token_ids, finish_reason == FinishReason.STOP
                 )
+                from vllm.v1.profiling.inference_trace import inference_trace
+
+                inference_trace(
+                    "detokenize",
+                    request_id=req_id,
+                    new_token_ids=new_token_ids,
+                    output_text_len=len(req_state.detokenizer.output_text),
+                    output_text_tail=req_state.detokenizer.output_text[-80:],
+                    is_prefilling=req_state.is_prefilling,
+                )
                 if stop_string:
                     finish_reason = FinishReason.STOP
                     stop_reason = stop_string
@@ -672,6 +682,17 @@ class OutputProcessor:
                     # Track per-request stats
                     self._update_stats_from_finished(
                         req_state, finish_reason, iteration_stats
+                    )
+                    from vllm.v1.profiling.inference_trace import inference_trace
+
+                    inference_trace(
+                        "output",
+                        request_id=req_id,
+                        finish_reason=str(finish_reason),
+                        stop_reason=str(stop_reason) if stop_reason else None,
+                        total_output_tokens=req_state.detokenizer.num_output_tokens()
+                        if req_state.detokenizer
+                        else 0,
                     )
                     if self.tracing_enabled:
                         self.do_tracing(engine_core_output, req_state, iteration_stats)

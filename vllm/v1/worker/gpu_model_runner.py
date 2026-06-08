@@ -1878,6 +1878,24 @@ class GPUModelRunner(
                 self.input_batch, num_scheduled_tokens, num_sampled_tokens
             )
 
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        req_ids = self.input_batch.req_ids[:num_reqs]
+        input_ids_list = self.input_ids.cpu[:total_num_scheduled_tokens].tolist()
+        positions_list = self.positions.np[:total_num_scheduled_tokens].tolist()
+        inference_trace(
+            "prepare_inputs",
+            num_reqs=num_reqs,
+            total_tokens=total_num_scheduled_tokens,
+            per_req_tokens=num_scheduled_tokens.tolist(),
+            req_ids=req_ids,
+            input_ids=input_ids_list,
+            positions=positions_list,
+            num_computed_tokens=self.input_batch.num_computed_tokens_cpu[
+                :num_reqs
+            ].tolist(),
+        )
+
         return (
             logits_indices,
             spec_decode_metadata,
@@ -1973,6 +1991,24 @@ class GPUModelRunner(
             block_table_tensor=block_table_gid_0,
             slot_mapping=slot_mapping_gid_0,
             causal=True,
+        )
+
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        block_table_sample = block_table_gid_0[:num_reqs, :8].cpu().tolist()
+        slot_mapping_sample = slot_mapping_gid_0[: min(num_tokens, 16)].cpu().tolist()
+        inference_trace(
+            "attention_meta",
+            num_reqs=num_reqs,
+            num_tokens=num_tokens,
+            max_query_len=max_query_len,
+            max_seq_len=max_seq_len,
+            block_table_head=block_table_sample,
+            slot_mapping_head=slot_mapping_sample,
+            num_computed_tokens=self.input_batch.num_computed_tokens_cpu[
+                :num_reqs
+            ].tolist(),
+            seq_lens=self.seq_lens.np[:num_reqs].tolist(),
         )
 
         if self.dcp_world_size > 1:
@@ -3009,6 +3045,16 @@ class GPUModelRunner(
             # TODO(woosuk): Avoid the copy. Optimize.
             self.inputs_embeds.gpu[:num_scheduled_tokens].copy_(inputs_embeds_scheduled)
 
+            from vllm.v1.profiling.inference_trace import inference_trace
+
+            inference_trace(
+                "embed",
+                num_tokens=num_scheduled_tokens,
+                embed_shape=list(inputs_embeds_scheduled.shape),
+                num_mm_embeds=len(mm_embeds) if mm_embeds else 0,
+                path="multimodal_embed_input_ids",
+            )
+
             input_ids, inputs_embeds = self._prepare_mm_inputs(num_input_tokens)
             model_kwargs = {
                 **self._init_model_kwargs(),
@@ -3049,6 +3095,14 @@ class GPUModelRunner(
             input_ids = self.input_ids.gpu[:num_input_tokens]
             inputs_embeds = None
             model_kwargs = self._init_model_kwargs()
+            from vllm.v1.profiling.inference_trace import inference_trace
+
+            inference_trace(
+                "embed",
+                num_tokens=num_scheduled_tokens,
+                path="token_ids_to_embedding_layer_inside_model",
+                input_ids_sample=self.input_ids.cpu[: min(num_scheduled_tokens, 8)].tolist(),
+            )
 
         if self.uses_mrope:
             positions = self.mrope_positions.gpu[:, :num_input_tokens]
@@ -3869,6 +3923,20 @@ class GPUModelRunner(
                 assert broadcasted is not None
                 logits = broadcasted["logits"]
 
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        logits_shape = list(logits.shape) if logits is not None else None
+        inference_trace(
+            "forward",
+            num_reqs=num_reqs,
+            num_tokens_unpadded=num_tokens_unpadded,
+            num_tokens_padded=num_tokens_padded,
+            cudagraph_mode=cudagraph_mode.name,
+            logits_shape=logits_shape,
+            has_mm_embeds=inputs_embeds is not None,
+            use_input_ids=input_ids is not None,
+        )
+
         self.execute_model_state = ExecuteModelState(
             scheduler_output,
             logits,
@@ -4051,6 +4119,15 @@ class GPUModelRunner(
                 hidden_states,
                 scheduler_output.total_num_scheduled_tokens,
                 spec_decode_metadata,
+            )
+
+        from vllm.v1.profiling.inference_trace import inference_trace
+
+        for req_id, token_ids in zip(req_ids_output_copy, valid_sampled_token_ids):
+            inference_trace(
+                "sample",
+                request_id=req_id,
+                sampled_token_ids=token_ids,
             )
 
         if propose_drafts_after_bookkeeping:

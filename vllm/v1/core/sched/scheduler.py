@@ -941,6 +941,38 @@ class Scheduler(SchedulerInterface):
             num_new_reqs=len(scheduled_new_reqs),
             num_preempted=len(preempted_reqs),
         )
+        from vllm.v1.profiling.inference_trace import (
+            classify_request_phase,
+            classify_step_kind,
+            inference_trace,
+        )
+
+        step_kind = classify_step_kind(per_req_tokens)
+        inference_trace(
+            "schedule",
+            step_kind=step_kind,
+            num_running=len(self.running),
+            num_waiting=len(self.waiting) + len(self.skipped_waiting),
+            total_tokens=total_num_scheduled_tokens,
+            num_scheduled_reqs=len(per_req_tokens),
+            num_preempted=len(preempted_reqs),
+        )
+        for req_id, num_tokens in num_scheduled_tokens.items():
+            req = self.requests.get(req_id)
+            if req is None:
+                continue
+            inference_trace(
+                "schedule_req",
+                request_id=req_id,
+                num_scheduled_tokens=num_tokens,
+                num_computed_tokens=req.num_computed_tokens,
+                num_tokens_total=req.num_tokens,
+                req_phase=classify_request_phase(
+                    req.num_computed_tokens, num_tokens
+                ),
+                step_kind=step_kind,
+                is_new=req_id in {r.request_id for r in scheduled_new_reqs},
+            )
         return scheduler_output
 
     def _preempt_request(self, request: Request, timestamp: float) -> None:

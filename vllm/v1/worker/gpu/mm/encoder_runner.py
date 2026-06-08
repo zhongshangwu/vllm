@@ -58,6 +58,15 @@ class EncoderRunner:
         ):
             batch_outputs = self.model.embed_multimodal(**mm_kwargs_batch)
             sanity_check_mm_encoder_outputs(batch_outputs, expected_num_items=num_items)
+            from vllm.v1.profiling.inference_trace import inference_trace
+
+            for out in batch_outputs:
+                inference_trace(
+                    "vit_encode",
+                    modality=modality,
+                    num_items=num_items,
+                    embed_shape=list(out.shape),
+                )
             encoder_outputs.extend(batch_outputs)
         return encoder_outputs
 
